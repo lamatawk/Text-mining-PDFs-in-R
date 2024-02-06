@@ -1,0 +1,84 @@
+# Clean environment
+# =============================================================================
+rm(list=ls())
+graphics.off()
+cat("\014")
+# =============================================================================
+
+
+# Load extraction function
+# =============================================================================
+source("Aux_pdfsExtractor.R")
+# =============================================================================
+
+fullWordsFreqHist <- function() {
+  # Get input files
+  pdfsFolderPath <- file.path(getwd(), "Inputs/PDFs")
+  pdfsPaths <- list.files(pdfsFolderPath, pattern="*.pdf", full.names=TRUE)
+  
+  # Delete old output files
+  unlink("1. Full words freq/*")
+  
+  # Output path and sheet name
+  outputPath <- "1. Full words freq/AllWords.xlsx"
+  sheetName <- "AllWords"
+  
+  # Create workbook and sheet
+  wBook <- createWorkbook()
+  addWorksheet(wBook, sheetName)
+  showGridLines(wBook, 1, showGridLines = FALSE)
+  saveWorkbook(wBook, file = outputPath, overwrite = TRUE)
+  outFullList <- list()
+  
+  # Write results to the excel file
+  colCounter <- 1
+  for (i in pdfsPaths) {
+    outFull <- freqFullWords(i, "english")
+    outFullList <- append(outFullList, list(outFull))
+    
+    # Define styles
+    myHeaderStyle <- openxlsx::createStyle(fontSize = 12, fontColour= "#FFFFFF", 
+                                           halign = "center", fgFill = "#0000FF", 
+                                           border = "TopBottomLeftRight",  
+                                           borderStyle = "medium", valign = "center", 
+                                           textDecoration = "bold", wrapText = FALSE)
+    myPdfNamesStyle <- openxlsx::createStyle(fontSize = 12, fontColour = "#FFFFFF", 
+                                             halign = "center", fgFill = "#990033", 
+                                             border = "TopBottomLeftRight",  
+                                             borderStyle = "medium", valign = "center", 
+                                             textDecoration = "bold", wrapText = FALSE)
+    # Write data to excel
+    writeData(wBook, sheetName, outFull, startRow = 2, startCol = colCounter, 
+              headerStyle = myHeaderStyle, borders = "surrounding", borderStyle = "medium")
+    writeData(wBook, sheetName, tools::file_path_sans_ext(basename(i)), startRow = 1, 
+              startCol = colCounter, borders = "surrounding", borderStyle = "medium")
+    setColWidths(wBook, sheetName, cols = colCounter + 2, widths = "1")
+    mergeCells(wBook, sheetName, cols = colCounter:(colCounter + 1), rows = 1)
+    addStyle(wBook, sheet = sheetName, style = myPdfNamesStyle, rows = 1, cols = colCounter)
+    
+    colCounter <- colCounter + 3
+  }
+  saveWorkbook(wBook, file = outputPath, overwrite = TRUE)
+  
+  # Build a histogram per pdf (with 10 most common terms)
+  for (i in pdfsPaths) {
+    # Create chart data
+    index <- match(i, pdfsPaths)
+    topFreq <- head(unlist(outFullList[[index]][2]), 10)
+    topWord <- head(unlist(outFullList[[index]][1]), 10)
+    
+    # Create png for each plot
+    png(file = paste("1. Full words freq/hist_", tools::file_path_sans_ext(basename(i)), ".png"), 
+        width = 3.5, height = 2.5, units = "in", res = 1100, pointsize = 4)
+    
+    # Plot bar chart 
+    par(mar=c(12, 10, 6, 4), mgp=c(8, 0.5, 0), las=1)
+    barplot(topFreq, names.arg = topWord, xlab = "Top words", ylab = "Frequency",
+            col = "#990033", main = tools::file_path_sans_ext(basename(i)), las = 2,
+            cex.axis = 1.5, cex.names = 1.5, cex.main = 2, cex.lab = 2)
+    
+    # Save file
+    dev.off()
+  }
+  cat(green("Done!\n"))
+}
