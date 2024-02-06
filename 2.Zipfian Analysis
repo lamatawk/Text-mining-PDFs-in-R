@@ -1,0 +1,173 @@
+# Housekeeping
+# =============================================================================
+rm(list=ls())          # Clear variables
+graphics.off()         # Clear plotting devices
+cat("\014")            # Clear console
+# =============================================================================
+
+# Load extraction functions
+# =============================================================================
+source("Aux_pdfsExtractor.R")
+# =============================================================================
+
+zipfLaw <- function() {
+  
+  # Get input files
+  pdfsFolderPath <- file.path(getwd(), "Inputs/PDFs")
+  pdfsPaths <- list.files(pdfsFolderPath, pattern="*.pdf", full.names=TRUE)
+  
+  # Delete old folders and create new ones
+  unlink('2. Zipf law/1. Plots', recursive = TRUE, force = TRUE)
+  unlink('2. Zipf law/2. Plots vs LReg', recursive = TRUE, force = TRUE)
+  dir.create('2. Zipf law/1. Plots')
+  dir.create('2. Zipf law/2. Plots vs LReg')
+  
+  # Extract data from PDFs
+  outFullList <- lapply(pdfsPaths, function(i) {
+    preparedData <- fullCleanWords_stopWKept(i)
+    pdfName <- tools::file_path_sans_ext(basename(i))
+    list(pdfName = pdfName, data = preparedData)
+  })
+  
+  # Convert data to tibble
+  tibble_pdf_text <- tibble::tibble(
+    pdfName = sapply(outFullList, `[[`, "pdfName"),
+    text = unlist(sapply(outFullList, `[[`, "data"))
+  )
+  
+  # Compute term frequency per PDF
+  tibble_pdf_word_freq <- tibble_pdf_text %>%
+    tidytext::unnest_tokens(word, text) %>%
+    dplyr::count(pdfName, word, sort = TRUE)
+  
+  # Compute total words per PDF
+  tibble_pdf_total <- tibble_pdf_word_freq %>% 
+    dplyr::group_by(pdfName) %>% 
+    dplyr::summarize(total = sum(n))
+  
+  # Join term frequency and total words per PDF
+  tibble_pdf_word_freq_total <- dplyr::left_join(tibble_pdf_word_freq, tibble_pdf_total)
+  
+  # Add rank and term frequency columns
+  tibble_pdf_word_freq_total_rank_tf <- tibble_pdf_word_freq_total %>% 
+    dplyr::group_by(pdfName) %>% 
+    dplyr::mutate(rank = row_number(), 
+                  `term frequency` = n/total) %>%
+    dplyr::ungroup()
+  
+  # Plot Zipf's law
+  groupPlot <- tibble_pdf_word_freq_total_rank_tf %>% 
+    ggplot2::ggplot(aes(rank, `term frequency`, color = pdfName)) + 
+    ggplot2::geom_line(alpha = 1, show.legend = TRUE) + 
+    ggplot2::scale_x_log10() +
+    ggplot2::scale_y_log10() +
+    ggplot2::labs(
+      title = "All PDFs",
+      subtitle = "Zipf's law") +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(color = "#0099f9", size = 15, face = "bold", 
+                                         hjust = 0.5),
+      plot.subtitle = ggplot2::element_text(size = 10, face = "bold", hjust = 0.5),
+      axis.text.x = ggplot2::element_text(size = 8),
+      axis.text.y = ggplot2::element_text(size = 8),
+      axis.title = ggplot2::element_text(size = 9, face = "bold"),
+      legend.text = ggplot2::element_text(size = 6),
+      legend.title = ggplot2::element_blank()
+    ) + 
+    ggplot2::scale_color_viridis(discrete = TRUE, option = "D") +
+    ggplot2::scale_fill_viridis(discrete = TRUE) 
+  
+  # Save plot
+  png(file = "2. Zipf law/1. Plots/All-in-one.png", width = 4.5, height = 3, units = "in", 
+      res = 1100, pointsize = 4)
+  print(groupPlot)
+  dev.off()
+  
+  # Compare with linear regression
+  linearReg <- lm(log10(`term frequency`) ~ log10(rank), 
+                  data = tibble_pdf_word_freq_total_rank_tf)
+  intercp <- coefficients(linearReg)[1]
+  slop <- coefficients(linearReg)[2]
+  
+  groupPlotR <- groupPlot + 
+    ggplot2::geom_abline(intercept = intercp, slope = slop, color = "gray50", linetype = 2) 
+  
+  # Save comparison plot
+  png(file = "2. Zipf law/2. Plots vs LReg/All-in-one+R.png", width = 4.5, height = 3, 
+      units = "in", res = 1100, pointsize = 4)
+  print(groupPlotR)
+  dev.off()
+  
+  # Individual plots for each PDF
+  tibble_split <- split(tibble_pdf_word_freq_total_rank_tf, tibble_pdf_word_freq_total_rank_tf$pdfName)
+  
+  lapply(names(tibble_split), function(i) {
+    ggplot2::ggsave(
+      filename = paste0("2. Zipf law/1. Plots/", i, ".png"), 
+      plot = ggplot2::ggplot(tibble_split[[i]], ggplot2::aes(rank, `term frequency`)) +
+        ggplot2::geom_line(color = "#0099f9") + 
+        ggplot2::geom_point(size = 0.5) +
+        ggplot2::scale_x_log10() +
+        ggplot2::scale_y_log10() +
+        ggplot2::ggtitle(i) +
+        ggplot2::labs(
+          subtitle = "Zipf's law",
+          caption = paste("Intercept:", format(round(intercept, 2), nsmall = 2), 
+                          "Slope:", format(round(slope, 2), nsmall = 2))
+        ) +
+        ggplot2::theme(
+          plot.title = ggplot2::element_text(color = "#0099f9", size = 15, face = "bold", 
+                                             hjust = 0.5),
+          plot.subtitle = ggplot2::element_text(size = 10, face = "bold", hjust = 0.5),
+          axis.text.x = ggplot2::element_text(size = 8),
+          axis.text.y = ggplot2::element_text(size = 8),
+          axis.title = ggplot2::element_text(size = 9, face = "bold"),
+          plot.caption = ggplot2::element_text(color = "#009900", size = 7, face = "bold", 
+                                               hjust = 0.5)
+        ),
+      device = "png",
+      width = 3,
+      height = 3
+    )
+  })
+  
+  # Compare individual plots with their own linear regression
+  lapply(names(tibble_split), function(i) {
+    reg <- lm(log10(`term frequency`) ~ log10(rank), 
+              data = tibble_split[[i]])
+    intercept <- coefficients(reg)[1]
+    slope <- coefficients(reg)[2]
+    
+    ggplot2::ggsave(
+      filename = paste0("2. Zipf law/2. Plots vs LReg/", i, ".png"), 
+      plot = ggplot2::ggplot(tibble_split[[i]], ggplot2::aes(rank, `term frequency`)) +
+        ggplot2::geom_line(color = "#0099f9") + 
+        ggplot2::geom_point(size = 0.5) +
+        ggplot2::geom_abline(intercept = intercept, slope = slope, color = "gray50", 
+                             linetype = 2) +
+        ggplot2::scale_x_log10() +
+        ggplot2::scale_y_log10() +
+        ggplot2::ggtitle(i) +
+        ggplot2::labs(
+          subtitle = "Zipf's law vs Linear Regression",
+          caption = paste("Intercept:", format(round(intercept, 2), nsmall = 2), 
+                          "Slope:", format(round(slope, 2), nsmall = 2))
+        ) +
+        ggplot2::theme(
+          plot.title = ggplot2::element_text(color = "#0099f9", size = 15, face = "bold", 
+                                             hjust = 0.5),
+          plot.subtitle = ggplot2::element_text(size = 10, face = "bold", hjust = 0.5),
+          axis.text.x = ggplot2::element_text(size = 8),
+          axis.text.y = ggplot2::element_text(size = 8),
+          axis.title = ggplot2::element_text(size = 9, face = "bold"),
+          plot.caption = ggplot2::element_text(color = "#009900", size = 7, face = "bold", 
+                                               hjust = 0.5)
+        ),
+      device = "png",
+      width = 3,
+      height = 3
+    )
+  })
+  
+  cat(green("Done!\n"))
+}
